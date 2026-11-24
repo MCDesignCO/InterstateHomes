@@ -5,26 +5,27 @@ services:
       dockerfile: infra/Dockerfile.api
     restart: unless-stopped
     ports:
-      - "4000:4000"
+      - "4000:8080"
     environment:
       NODE_ENV: production
-      PORT: 4000
+      PORT: 8080
       HOST: 0.0.0.0
       DEMO_MODE: "false"
       DATABASE_URL: ${DATABASE_URL}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY}
       SESSION_SECRET: ${SESSION_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN}
-      S3_ENDPOINT: ${S3_ENDPOINT}
-      S3_REGION: ${S3_REGION}
-      S3_BUCKET: ${S3_BUCKET}
-      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
-      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
+      GCS_BUCKET: ${GCS_BUCKET:-}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_REGION: ${S3_REGION:-us-west-2}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
       DOCUSEAL_URL: http://docuseal:3000
-      DOCUSEAL_API_KEY: ${DOCUSEAL_API_KEY}
-      EMAIL_PROVIDER: ${EMAIL_PROVIDER}
-      EMAIL_FROM: ${EMAIL_FROM}
-      RESEND_API_KEY: ${RESEND_API_KEY}
+      DOCUSEAL_API_KEY: ${DOCUSEAL_API_KEY:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-console}
+      EMAIL_FROM: ${EMAIL_FROM:-estimating@interstatehomes.com}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
     depends_on:
       - docuseal
 
@@ -32,14 +33,14 @@ services:
     build:
       context: ..
       dockerfile: infra/Dockerfile.web
-      args:
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3000:8080"
     environment:
       NODE_ENV: production
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      PORT: 8080
+      HOSTNAME: 0.0.0.0
+      API_INTERNAL_URL: http://api:8080
     depends_on:
       - api
 

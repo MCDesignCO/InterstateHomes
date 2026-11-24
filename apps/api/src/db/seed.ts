@@ -9,7 +9,9 @@ import {
   costCodes,
   subdivisions,
   systemSettings,
+  users,
 } from './schema/index.js';
+import { hashPassword } from '../security/crypto.js';
 
 const INITIAL_SUBDIVISIONS = [
   { code: 'CH', name: 'Cottonwood Hollow', city: 'La Verkin', jurisdiction: 'La Verkin City', defaultHoaFeeCents: 65000 },
@@ -101,8 +103,32 @@ async function seed() {
     })
     .onConflictDoNothing({ target: systemSettings.id });
 
+  const initialAdminEmail = (
+    process.env.INITIAL_ADMIN_EMAIL ?? 'chase@interstatehomes.com'
+  )
+    .trim()
+    .toLowerCase();
+  const initialAdminPassword =
+    process.env.INITIAL_ADMIN_PASSWORD ?? 'ChangeMe-Interstate2026!';
+  const passwordHash = await hashPassword(initialAdminPassword);
+
+  await db
+    .insert(users)
+    .values({
+      email: initialAdminEmail,
+      fullName: 'Chase Stratton',
+      role: 'admin',
+      subCompanyId: null,
+      isSubCompanyAdmin: false,
+      passwordHash,
+      mfaEnabled: false,
+      status: 'active',
+      failedLoginAttempts: 0,
+    })
+    .onConflictDoNothing({ target: users.email });
+
   console.log(
-    `Seeded ${COST_CLASSIFICATIONS.length} classifications, ${COST_CODES.length} cost codes, ${INITIAL_SUBDIVISIONS.length} subdivisions, and default system settings.`
+    `Seeded ${COST_CLASSIFICATIONS.length} classifications, ${COST_CODES.length} cost codes, ${INITIAL_SUBDIVISIONS.length} subdivisions, default system settings, and initial admin (${initialAdminEmail}).`
   );
   await closeDb();
 }

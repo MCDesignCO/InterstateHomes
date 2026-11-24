@@ -2,6 +2,12 @@ import { getDb, isDatabaseConfigured, isDemoMode } from '../db/client.js';
 import { auditLogs } from '../db/schema/index.js';
 import { demoStore } from '../data/demo-store.js';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isValidUuid(value: string | null | undefined): value is string {
+  return typeof value === 'string' && UUID_REGEX.test(value);
+}
+
 export interface AuditEntryInput {
   actorUserId?: string | null;
   actorEmail?: string | null;
@@ -34,12 +40,12 @@ export async function writeAuditLog(entry: AuditEntryInput): Promise<void> {
 
   const db = getDb();
   await db.insert(auditLogs).values({
-    actorUserId: entry.actorUserId ?? null,
+    actorUserId: isValidUuid(entry.actorUserId) ? entry.actorUserId : null,
     actorEmail: entry.actorEmail ?? null,
     action: entry.action,
     entityType: entry.entityType,
     entityId: entry.entityId,
-    homeId: entry.homeId ?? null,
+    homeId: isValidUuid(entry.homeId) ? entry.homeId : null,
     ipAddress: entry.ipAddress ?? null,
     beforeValues: entry.beforeValues ?? null,
     afterValues: entry.afterValues ?? null,

@@ -1,0 +1,160 @@
+# Interstate Homes — Google Cloud Build CI/CD Pipeline (Staging & Production)
+# Triggers:
+#   - Staging (branch: ^staging$): default substitutions below
+#   - Production (branch: ^main$): override _ENV=prod, _API_SERVICE=interstate-api-prod,
+#     _WEB_SERVICE=interstate-web-prod, _MIGRATE_JOB=interstate-migrate-prod,
+#     _GCS_BUCKET=<prod-bucket-name>
+
+substitutions:
+  _ENV: staging
+  _REGION: us-west1
+  _REPO: interstate-homes
+  _API_SERVICE: interstate-api-staging
+  _WEB_SERVICE: interstate-web-staging
+  _MIGRATE_JOB: interstate-migrate-staging
+  _GCS_BUCKET: interstate-homes-docs-staging
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+
+steps:
+  # 1. Build API image (shared by Cloud Run API Service and Cloud Run Migration Job)
+  - id: build-api
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']
+    args:
+      - build
+      - -f
+      - infra/Dockerfile.api
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:${_ENV}
+      - .
+
+  # 2. Build Web image in parallel (runtime API_INTERNAL_URL proxy; no build-time API URL needed)
+  - id: build-web
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['-']
+    args:
+      - build
+      - -f
+      - infra/Dockerfile.web
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$COMMIT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:${_ENV}
+      - .
+
+  # 3a. Push API image tags to Artifact Registry before running migrations
+  - id: push-api
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['build-api']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$COMMIT_SHA"
+        docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:${_ENV}"
+
+  # 3b. Push Web image tags to Artifact Registry
+  - id: push-web
+    name: gcr.io/cloud-builders/docker
+    waitFor: ['build-web']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$COMMIT_SHA"
+        docker push "${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:${_ENV}"
+
+  # 4. Deploy & execute Cloud Run Migration Job (--wait) before shifting traffic
+  - id: migrate-and-seed
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: ['push-api']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        gcloud run jobs deploy "${_MIGRATE_JOB}" \
+          --project="$PROJECT_ID" \
+          --region="${_REGION}" \
+          --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$COMMIT_SHA" \
+          --service-account="interstate-api-${_ENV}@$PROJECT_ID.iam.gserviceaccount.com" \
+          --command="sh" \
+          --args="-c,node apps/api/dist/db/migrate.js && node apps/api/dist/db/seed.js" \
+          --set-env-vars="NODE_ENV=production,DEMO_MODE=false" \
+          --set-secrets="DATABASE_URL=interstate-${_ENV}-database-url:latest" \
+          --max-retries=1 \
+          --task-timeout="10m" \
+          --cpu=1 \
+          --memory="512Mi" \
+          --quiet
+
+        gcloud run jobs execute "${_MIGRATE_JOB}" \
+          --project="$PROJECT_ID" \
+          --region="${_REGION}" \
+          --wait \
+          --quiet
+
+  # 5. Deploy Cloud Run API Service with Secret Manager refs & Workload Identity GCS bucket
+  - id: deploy-api
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    waitFor: ['migrate-and-seed']
+    args:
+      - run
+      - deploy
+      - ${_API_SERVICE}
+      - --project=$PROJECT_ID
+      - --region=${_REGION}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$COMMIT_SHA
+      - --port=8080
+      - --allow-unauthenticated
+      - --service-account=interstate-api-${_ENV}@$PROJECT_ID.iam.gserviceaccount.com
+      - --set-env-vars=NODE_ENV=production,DEMO_MODE=false,GCS_BUCKET=${_GCS_BUCKET},EMAIL_FROM=estimating@interstatehomes.com
+      - --set-secrets=DATABASE_URL=interstate-${_ENV}-database-url:latest,APP_ENCRYPTION_KEY=interstate-${_ENV}-app-encryption-key:latest,SESSION_SECRET=interstate-${_ENV}-session-secret:latest,DOCUSEAL_API_KEY=interstate-${_ENV}-docuseal-api-key:latest,RESEND_API_KEY=interstate-${_ENV}-resend-api-key:latest
+      - --min-instances=0
+      - --max-instances=10
+      - --cpu=1
+      - --memory=512Mi
+      - --quiet
+
+  # 6. Capture deployed API URL and deploy Cloud Run Web Service with runtime API_INTERNAL_URL
+  - id: deploy-web
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    waitFor: ['push-web', 'deploy-api']
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        API_URL="$(gcloud run services describe "${_API_SERVICE}" \
+          --project="$PROJECT_ID" \
+          --region="${_REGION}" \
+          --format="value(status.url)" \
+          --quiet)"
+        if [ -z "$$API_URL" ]; then
+          echo "ERROR: Could not resolve URL for Cloud Run service ${_API_SERVICE}" >&2
+          exit 1
+        fi
+        echo "Deploying ${_WEB_SERVICE} with API_INTERNAL_URL=$$API_URL"
+        gcloud run deploy "${_WEB_SERVICE}" \
+          --project="$PROJECT_ID" \
+          --region="${_REGION}" \
+          --image="${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$COMMIT_SHA" \
+          --port=8080 \
+          --allow-unauthenticated \
+          --service-account="interstate-web-${_ENV}@$PROJECT_ID.iam.gserviceaccount.com" \
+          --set-env-vars="NODE_ENV=production,API_INTERNAL_URL=$$API_URL" \
+          --min-instances=0 \
+          --max-instances=10 \
+          --cpu=1 \
+          --memory=512Mi \
+          --quiet
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:$COMMIT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/api:${_ENV}
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:$COMMIT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/web:${_ENV}

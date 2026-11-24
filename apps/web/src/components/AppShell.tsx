@@ -1,8 +1,8 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Home,
@@ -16,6 +16,8 @@ import {
   Sheet,
   ListOrdered,
   Settings,
+  LogOut,
+  ShieldCheck,
 } from 'lucide-react';
 import { ROLE_LABELS, type UserRole } from '@interstate/shared';
 import { InterstateLogo } from './InterstateLogo';
@@ -36,7 +38,45 @@ interface NavGroup {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { role, setRole } = useRole();
+  const router = useRouter();
+  const { role, setRole, authMode, user, authenticated, loading, logout } = useRole();
+  const [signingOut, setSigningOut] = useState(false);
+
+  const isAuthRoute = pathname === '/login' || pathname.startsWith('/login/');
+
+  useEffect(() => {
+    if (!isAuthRoute && !loading && authMode === 'postgres' && !authenticated) {
+      router.replace('/login');
+    }
+  }, [isAuthRoute, loading, authMode, authenticated, router]);
+
+  // Do not wrap /login in the sidebar AppShell
+  if (isAuthRoute) {
+    return <>{children}</>;
+  }
+
+  // Prevent flashing protected content or firing unauthenticated API calls while checking session
+  if (loading) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#F4F4F1] text-[#111111] gap-4">
+        <InterstateLogo variant="light" />
+        <div className="text-xs font-display uppercase tracking-[0.14em] text-[#5F5F5A]">
+          Verifying session…
+        </div>
+      </div>
+    );
+  }
+
+  if (!loading && authMode === 'postgres' && !authenticated) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#F4F4F1] text-[#111111] gap-4">
+        <InterstateLogo variant="light" />
+        <div className="text-xs font-display uppercase tracking-[0.14em] text-[#5F5F5A]">
+          Redirecting to sign in…
+        </div>
+      </div>
+    );
+  }
 
   const internalGroups: NavGroup[] = [
     {
@@ -88,6 +128,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   const groups = role === 'subcontractor' ? subPortalGroups : internalGroups;
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await logout();
+      router.replace('/login');
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   return (
     <div className="min-h-screen flex bg-[#F4F4F1] text-[#111111]">
@@ -146,28 +196,59 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </nav>
         </div>
 
-        {/* Role Preview Switcher to inspect all 4 SOW RBAC views */}
-        <div className="p-3.5 border-t border-[#2C2C2A] bg-[#0B0B0A]">
-          <label className="block text-[10px] font-display uppercase tracking-[0.1em] text-[#9D9D97] mb-1.5">
-            Active Role View
-          </label>
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as UserRole)}
-            className="w-full bg-[#1C1C1A] border border-[#2C2C2A] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#FCAE1A]"
-          >
-            <option value="estimator_approver">{ROLE_LABELS.estimator_approver}</option>
-            <option value="project_manager">{ROLE_LABELS.project_manager}</option>
-            <option value="subcontractor">{ROLE_LABELS.subcontractor}</option>
-            <option value="admin">{ROLE_LABELS.admin}</option>
-          </select>
-          <div className="mt-2 text-[10px] text-[#9D9D97]">
-            {role === 'project_manager' && 'Profit, land & margin hidden (Sec 4)'}
-            {role === 'subcontractor' && 'Scoped to Red Cliffs Drywall'}
-            {role === 'estimator_approver' && 'Full estimating & PO approval'}
-            {role === 'admin' && 'Full system & audit access'}
+        {/* Footer: Authenticated Session Panel (Postgres mode) OR Role Preview Switcher (Demo mode) */}
+        {authMode === 'postgres' && user ? (
+          <div className="p-3.5 border-t border-[#2C2C2A] bg-[#0B0B0A] space-y-2.5">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="text-xs font-semibold text-white truncate">{user.fullName}</div>
+                <div className="text-[11px] text-[#9D9D97] truncate">{user.email}</div>
+              </div>
+              {user.mfaEnabled ? (
+                <span
+                  title="MFA Protected Session"
+                  className="shrink-0 inline-flex items-center text-[#FCAE1A]"
+                >
+                  <ShieldCheck className="w-4 h-4" />
+                </span>
+              ) : null}
+            </div>
+            <div className="inline-block text-[10px] font-display uppercase tracking-[0.08em] px-2 py-0.5 rounded bg-[#1C1C1A] border border-[#2C2C2A] text-[#FCAE1A]">
+              {ROLE_LABELS[user.role] ?? user.role}
+            </div>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="w-full flex items-center justify-center gap-2 px-2.5 py-1.5 rounded text-xs font-semibold bg-[#1C1C1A] hover:bg-[#262624] border border-[#2C2C2A] text-[#E3E3DE] hover:text-white transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>{signingOut ? 'Signing out…' : 'Sign Out'}</span>
+            </button>
           </div>
-        </div>
+        ) : (
+          <div className="p-3.5 border-t border-[#2C2C2A] bg-[#0B0B0A]">
+            <label className="block text-[10px] font-display uppercase tracking-[0.1em] text-[#9D9D97] mb-1.5">
+              Active Role View
+            </label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as UserRole)}
+              className="w-full bg-[#1C1C1A] border border-[#2C2C2A] rounded px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-[#FCAE1A]"
+            >
+              <option value="estimator_approver">{ROLE_LABELS.estimator_approver}</option>
+              <option value="project_manager">{ROLE_LABELS.project_manager}</option>
+              <option value="subcontractor">{ROLE_LABELS.subcontractor}</option>
+              <option value="admin">{ROLE_LABELS.admin}</option>
+            </select>
+            <div className="mt-2 text-[10px] text-[#9D9D97]">
+              {role === 'project_manager' && 'Profit, land & margin hidden (Sec 4)'}
+              {role === 'subcontractor' && 'Scoped to Red Cliffs Drywall'}
+              {role === 'estimator_approver' && 'Full estimating & PO approval'}
+              {role === 'admin' && 'Full system & audit access'}
+            </div>
+          </div>
+        )}
       </aside>
 
       {/* Main Content Canvas */}
