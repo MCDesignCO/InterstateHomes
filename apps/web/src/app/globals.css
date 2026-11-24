@@ -1,0 +1,31 @@
+@import "tailwindcss";
+
+:root {
+  --paper: #ffffff;
+  --mist: #f4f4f1;
+  --ink: #111111;
+  --ink-2: #3b3b38;
+  --muted: #5f5f5a;
+  --rule: #e3e3de;
+  --amber: #fcae1a;
+  --amber-ink: #8a5a00;
+  --night: #0e1320;
+  --night-2: #c9ced8;
+  --font-display: "Montserrat", "Avenir Next", "Segoe UI", sans-serif;
+  --font-body: "Nunito Sans", "Segoe UI", sans-serif;
+}
+
+body {
+  background-color: var(--mist);
+  color: var(--ink);
+  font-family: var(--font-body), "Nunito Sans", "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display), "Montserrat", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,280 @@
+'use client';
+
+import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ROLE_LABELS } from '@interstate/shared';
+import { apiFetch, formatCurrency } from '@/lib/api';
+import { useRole } from '@/lib/role-context';
+
+interface DashboardSummary {
+  role: string;
+  kpis: {
+    activeHomes: number;
+    quotesOut: number;
+    countersToReview: number;
+    posAwaitingSign: number;
+    complianceAlerts: number;
+    openClarifications: number;
+  };
+  needsAttention: Array<{
+    id: string;
+    badge: string;
+    severity: string;
+    title: string;
+    subtitle: string;
+    href: string;
+  }>;
+  activeHomes: Array<{
+    id: string;
+    homeCode: string;
+    subdivisionName: string;
+    planName: string;
+    stage: string;
+    planRevision: string;
+    posSignedLabel: string;
+    soldAmountCents: number | null;
+  }>;
+  pipeline: Array<{
+    stage: string;
+    label: string;
+    count: number;
+    totalEstimateCents: number;
+  }>;
+}
+
+const BADGE_STYLES: Record<string, string> = {
+  red: 'bg-[#FEE2E2] text-[#991B1B] border-[#FECACA]',
+  amber: 'bg-[#FEF3C7] text-[#8A5A00] border-[#FDE68A]',
+  blue: 'bg-[#DBEAFE] text-[#1E40AF] border-[#BFDBFE]',
+  neutral: 'bg-[#F4F4F1] text-[#3B3B38] border-[#E3E3DE]',
+};
+
+const STAGE_PILLS: Record<string, { label: string; cls: string }> = {
+  plan_intake: { label: 'Plan Intake', cls: 'bg-[#F4F4F1] text-[#3B3B38]' },
+  estimating: { label: 'Estimating', cls: 'bg-[#DBEAFE] text-[#1E40AF]' },
+  quotes_out: { label: 'Quotes Out', cls: 'bg-[#FEF3C7] text-[#8A5A00]' },
+  pos_esign: { label: 'POs / E-Sign', cls: 'bg-[#FFEDD5] text-[#9A3412]' },
+  live_budget: { label: 'Live Budget', cls: 'bg-[#DCFCE7] text-[#166534]' },
+};
+
+export default function DashboardPage() {
+  const { role, subCompanyId } = useRole();
+  const [data, setData] = useState<DashboardSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    apiFetch<DashboardSummary>('/api/dashboard/summary', { role, subCompanyId })
+      .then((res) => {
+        if (active) {
+          setData(res);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      });
+    return () => {
+      active = false;
+    };
+  }, [role, subCompanyId]);
+
+  const todayLabel = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  });
+
+  return (
+    <div className="space-y-5">
+      {/* Header matching wireframe */}
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <div className="text-xs text-[#5F5F5A]">
+            {todayLabel} · Signed in as {ROLE_LABELS[role]}
+          </div>
+          <h1 className="text-2xl font-display font-bold tracking-tight text-[#111111] mt-0.5">
+            Dashboard
+          </h1>
+        </div>
+        {role !== 'subcontractor' && role !== 'project_manager' ? (
+          <div className="flex items-center gap-2.5">
+            <Link
+              href="/homes?intake=1"
+              className="px-3.5 py-2 rounded-md border border-[#E3E3DE] bg-white text-xs font-display font-semibold text-[#111111] hover:border-[#111111] transition-colors"
+            >
+              New Plan Intake
+            </Link>
+            <Link
+              href="/estimates"
+              className="px-4 py-2 rounded-md bg-[#FCAE1A] text-xs font-display font-bold text-[#111111] hover:bg-[#111111] hover:text-white transition-colors"
+            >
+              + Open Estimate Builder
+            </Link>
+          </div>
+        ) : null}
+      </div>
+
+      {error ? (
+        <div className="bg-[#FEF2F2] border border-[#FECACA] text-[#991B1B] px-4 py-3 rounded-lg text-sm">
+          API connection note: {error}. Start the API server with <code>npm run dev:api</code>.
+        </div>
+      ) : null}
+
+      {/* Top 6 KPI Strip */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3.5">
+        {[
+          { label: 'Active homes', value: data?.kpis.activeHomes ?? '—', sub: 'In workflow' },
+          { label: 'Quotes out', value: data?.kpis.quotesOut ?? '—', sub: 'Awaiting sub reply' },
+          { label: 'Counters to review', value: data?.kpis.countersToReview ?? '—', sub: 'Sub price/qty edits' },
+          { label: 'POs awaiting sign', value: data?.kpis.posAwaitingSign ?? '—', sub: 'DocuSeal queue' },
+          { label: 'Compliance alerts', value: data?.kpis.complianceAlerts ?? '—', sub: 'Expired / missing docs' },
+          { label: 'Open clarifications', value: data?.kpis.openClarifications ?? '—', sub: 'Post-approval log' },
+        ].map((kpi) => (
+          <div
+            key={kpi.label}
+            className="bg-white border border-[#E3E3DE] rounded-lg px-4 py-3.5 shadow-[0_1px_2px_rgba(0,0,0,0.02)]"
+          >
+            <div className="text-xs text-[#5F5F5A]">{kpi.label}</div>
+            <div className="text-2xl font-display font-bold text-[#111111] mt-1 tabular-nums">
+              {kpi.value}
+            </div>
+            <div className="text-[11px] text-[#5F5F5A] mt-0.5">{kpi.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Middle 2-Column Row: Needs Attention + Active Homes */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Needs Attention */}
+        <section className="lg:col-span-6 bg-white border border-[#E3E3DE] rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[#E3E3DE]">
+            <h2 className="text-sm font-display font-bold text-[#111111]">Needs attention</h2>
+            <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#FEF3C7] text-[#8A5A00]">
+              {data?.needsAttention.length ?? 0} open
+            </span>
+          </div>
+          <div className="divide-y divide-[#E3E3DE]">
+            {(data?.needsAttention ?? []).map((item) => (
+              <Link
+                key={item.id}
+                href={item.href}
+                className="flex items-start gap-3 px-4 py-3 hover:bg-[#F4F4F1]/60 transition-colors"
+              >
+                <span
+                  className={`shrink-0 mt-0.5 text-[10px] font-display font-bold px-2 py-0.5 rounded border ${
+                    BADGE_STYLES[item.severity] ?? BADGE_STYLES.neutral
+                  }`}
+                >
+                  {item.badge}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold text-[#111111] leading-snug">
+                    {item.title}
+                  </div>
+                  <div className="text-xs text-[#5F5F5A] mt-0.5">{item.subtitle}</div>
+                </div>
+              </Link>
+            ))}
+            {data && data.needsAttention.length === 0 ? (
+              <div className="px-4 py-8 text-center text-xs text-[#5F5F5A]">
+                All compliance, quote, PO, and clarification queues are clear.
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {/* Active Homes Table */}
+        <section className="lg:col-span-6 bg-white border border-[#E3E3DE] rounded-lg overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-[#E3E3DE]">
+            <h2 className="text-sm font-display font-bold text-[#111111]">Active homes</h2>
+            <Link
+              href="/homes"
+              className="text-xs font-semibold text-[#8A5A00] hover:underline"
+            >
+              View all homes
+            </Link>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-[#E3E3DE] bg-[#F4F4F1]/70 text-[10px] font-display uppercase tracking-wider text-[#5F5F5A]">
+                  <th className="py-2.5 px-4">Home</th>
+                  <th className="py-2.5 px-3">Plan / Sub</th>
+                  <th className="py-2.5 px-3">POs</th>
+                  <th className="py-2.5 px-4 text-right">Stage</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#E3E3DE] text-[13px]">
+                {(data?.activeHomes ?? []).map((home) => {
+                  const pill = STAGE_PILLS[home.stage] ?? STAGE_PILLS.plan_intake;
+                  return (
+                    <tr key={home.id} className="hover:bg-[#F4F4F1]/40">
+                      <td className="py-2.5 px-4 font-semibold text-[#111111] whitespace-nowrap">
+                        <Link href={`/estimates?homeId=${home.id}`} className="hover:underline">
+                          {home.homeCode}
+                        </Link>
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <div className="font-medium text-[#111111]">{home.planName}</div>
+                        <div className="text-[11px] text-[#5F5F5A]">
+                          {home.subdivisionName} · {home.planRevision}
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 tabular-nums text-[#3B3B38]">
+                        {home.posSignedLabel}
+                      </td>
+                      <td className="py-2.5 px-4 text-right">
+                        <span
+                          className={`inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full ${pill.cls}`}
+                        >
+                          {pill.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {role === 'subcontractor' ? (
+                  <tr>
+                    <td colSpan={4} className="py-8 px-4 text-center text-xs text-[#5F5F5A]">
+                      Subcontractor Portal view shows only your assigned quotes and POs.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      {/* Bottom 5-Stage Pipeline Strip matching wireframe */}
+      {role !== 'subcontractor' ? (
+        <section className="bg-white border border-[#E3E3DE] rounded-lg p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-display font-bold text-[#111111]">Homes pipeline</h2>
+            <span className="text-xs text-[#5F5F5A]">
+              Plans-to-budget single-pass workflow (Section 2)
+            </span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {(data?.pipeline ?? []).map((stage) => (
+              <Link
+                key={stage.stage}
+                href="/homes"
+                className="border border-[#E3E3DE] rounded-md p-3 hover:border-[#FCAE1A] transition-colors bg-[#F4F4F1]/30"
+              >
+                <div className="text-xs text-[#5F5F5A]">{stage.label}</div>
+                <div className="text-xl font-display font-bold text-[#111111] mt-1 tabular-nums">
+                  {stage.count}
+                </div>
+                <div className="text-xs text-[#5F5F5A] mt-0.5 tabular-nums">
+                  {formatCurrency(stage.totalEstimateCents)}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}

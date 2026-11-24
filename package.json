@@ -1,0 +1,24 @@
+{
+  "name": "interstate-homes",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Interstate Homes Estimating, Subcontract and Budget Software",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=@interstate/api",
+    "dev:web": "npm run dev --workspace=@interstate/web",
+    "build": "npm run build --workspace=@interstate/shared && npm run build --workspace=@interstate/api && npm run build --workspace=@interstate/web",
+    "typecheck": "npm run typecheck --workspace=@interstate/shared && npm run typecheck --workspace=@interstate/api && npm run typecheck --workspace=@interstate/web",
+    "test": "npm run test --workspace=@interstate/shared && npm run test --workspace=@interstate/api",
+    "db:generate": "npm run db:generate --workspace=@interstate/api",
+    "db:migrate": "npm run db:migrate --workspace=@interstate/api",
+    "db:seed": "npm run db:seed --workspace=@interstate/api"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=10.0.0"
+  }
+}
